@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pyspark.sql.functions import *
 from pyspark.sql.dataframe import *
 from abc import ABC, abstractmethod
+from pyspark import SparkContext
+from pyspark import SparkConf
 
 class IFileReaderStrategy(ABC):
     @abstractmethod

@@ -4,13 +4,11 @@ from pyspark.sql.functions import *
 from pyspark.sql.dataframe import *
 from abc import ABC, abstractmethod
 
-
 class IFileReaderStrategy(ABC):
     @abstractmethod
     def get_dataframe(self, file_path) -> DataFrame:
         pass
 
-    
 @dataclass
 class CsvDataExtractor(IFileReaderStrategy):
     delimiter: str
@@ -34,8 +32,6 @@ class ExtractorFactory:
     def create(strategy_type: str, **kwarges) -> IFileReaderStrategy:
         strategy_type = strategy_type.lower()
         if strategy_type == "csv":
-            print("csv")
-            print(**kwarges)
             return CsvDataExtractor(**kwarges)
         else:
             raise ValueError("")

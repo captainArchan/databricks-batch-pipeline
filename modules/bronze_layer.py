@@ -5,6 +5,8 @@ from pyspark.sql.dataframe import *
 from abc import ABC, abstractmethod
 from pyspark import SparkContext
 from pyspark import SparkConf
+from pyspark.sql import DataFrame
+
 
 class IFileReaderStrategy(ABC):
     @abstractmethod

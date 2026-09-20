@@ -1,6 +1,8 @@
 
 from dataclasses import dataclass
 from pyspark.sql import DataFrame
+
+
 class BaseProcessor:
     def __init__(self, spark):
         self.spark = spark

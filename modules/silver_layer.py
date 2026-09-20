@@ -26,16 +26,17 @@ class Silverlayer:
     table_name: str
     shema_details: dict[str, str]
     write_mode: str
+    
 
+        
     def __post_init__(self) -> None:
         self.table_name_bronze = (f"{self.table_name}_bronze")
         self.table_name_silver = (f"{self.table_name}_silver")
         self.table_name_bad_record = (f"{self.table_name}_bad_record")
         
-        
     def read_data(self) -> Dataframe:
         return (
-            spark.table(self.table_name_bronze)
+            self.spark.table(self.table_name_bronze)
             .select(
                 *data_col,
                 monotonically_increasing_id().alias("_sk")

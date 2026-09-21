@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from src.common.regex_patterns import REGEX_PATTERNS
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import SparkSession, DataFrame, Window
 from pyspark.sql.functions import *
 from pyspark.sql.dataframe import *
 
@@ -31,7 +31,7 @@ class Silverlayer:
     shema_details: dict[str, str]
     keys: list[str]
     write_mode: str
-    
+    spark: SparkSession
     
     def __post_init__(self) -> None:
         self.table_name_bronze = (f"{self.table_name}_bronze")

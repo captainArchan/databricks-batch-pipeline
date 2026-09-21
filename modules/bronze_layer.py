@@ -5,14 +5,13 @@ from pyspark.sql.dataframe import *
 from abc import ABC, abstractmethod
 from pyspark import SparkContext
 from pyspark import SparkConf
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame
 
 
 class IFileReaderStrategy(ABC):
     @abstractmethod
-    def get_dataframe(self, spark: SparkSession, file_path: str) -> DataFrame:
+    def get_dataframe(self,file_path) -> DataFrame:
         pass
-
 
 @dataclass
 class CsvDataExtractor(IFileReaderStrategy):
@@ -21,8 +20,7 @@ class CsvDataExtractor(IFileReaderStrategy):
     multiline: bool
     escape_option: str
     quote_option: str
-    
-    def get_dataframe(self, spark:SparkSession, file_path:str)-> DataFrame:
+    def get_dataframe(self, file_path)-> DataFrame:
         return(
             spark.read.format("csv")
             .option("header", self.header)
@@ -32,48 +30,13 @@ class CsvDataExtractor(IFileReaderStrategy):
             .option("multiLine", self.multiline)
             .load(file_path)
         )
-@dataclass
-class JsonDataExtractor(IFileReaderStrategy):
-    header: bool = True
-    multiline: bool = False
-    primitivesAsString: bool = True
-    allowComments: bool = False
-    
-    def get_dataframe(self, spark: SparkSession, file_path:str) -> DataFrame:
-        return (
-            spark.read.format("json")
-            .option("header", self.header)
-            .option("multiline", self.multiline)
-            .option("primitivesAsString", self.primitibesAsStrings)
-            .option("allowComments", self.allowComments)
-        )
-        
-        
+
 class ExtractorFactory:
     @staticmethod
-    def create_csv(
-            delimiter: str = ',',
-            header: bool = True,
-            multiline: bool = False,
-            escape_option: str = '',
-            quote_option: str = ''
-    )-> IFileReaderStrategy:
-        return(
-            CsvDataExtractor(
-                delimiter=delimiter,
-                header=header,
-                multiline=multiline,
-                escape_option=escape_option,
-                quote_option=quote_option
-            )
-        )
-
     def create(strategy_type: str, **kwarges) -> IFileReaderStrategy:
         strategy_type = strategy_type.lower()
         if strategy_type == "csv":
             return CsvDataExtractor(**kwarges)
-        elif strategy_type == "json":
-            return JsonDataExtractor(**kwarges)
         else:
             raise ValueError("")
 

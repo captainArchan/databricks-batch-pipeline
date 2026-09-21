@@ -1,83 +1,38 @@
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame
 
-class BaseProcessor(ABC):
-    @abstractmethod
-    def save_data(self) -> None:
-        pass
+
+class BaseProcessor:
+    def __init__(self, spark):
+        self.spark = spark
     
-@dataclass
-class SCDType1(BaseProcessor):
-    spark: SparkSession
-    source_df: DataFrame
-    target_df: DataFrame
-    merge_keys: list[str]
-    value_keys: list[str]
+    def write_scd_type_1(self, source_df: DataFrame, target_df: DataFrame, merge_keys:list[str], value_keys: list[str]):    
         
-    def save_data(self) -> None:        
         source = (
-            self.source_df
-            .withColumn("hash_key", xxhash64(*self.merge_keys))
-            .withColumn("hash_value", xxhash64(*self.value_keys))
+            source_df
+            .withColumn("hash_key", xxhash64(*merge_keys))
+            .withColumn("hash_value", xxhash64(*value_keys))
         )
 
         target = (
-            self.target_df
-            .withColumn("hash_key", xxhash64(*self.merge_keys))
-            .withColumn("hash_value", xxhash64(*self.value_keys))
+            target_df
+            .withColumn("hash_key", xxhash64(*merge_keys))
+            .withColumn("hash_value", xxhash64(*value_keys))
         )
 
         log_df = (
-            self.target_df
+            target_df
             .alias("target")
             .merge(
-                source = self.source_df.alias("source"),
+                source = source_df.alias("source"),
                 condition = "target.hash_key = source.hash_key"
-            ).whenMatchUpdateAll()
+            ).whenMatchUpdateAll(
+                condition="target.hash_value != source.hash_value"
+                
+            )
             .whenNotMatchInsertAll()
         ).execute()
-
-
-class Factory():
-    @staticmethod
-    def create(write_mode: str, **kwarges) -> BaseProcessor:
-        write_mode = write_mode.lower()
-        if write_mode == "scd1":
-            return SCDType1(**kwarges)
     
-# class BaseProcessor:
-#     def __init__(self, spark):
-#         self.spark = spark
-    
-#     def write_scd_type_1(self, source_df: DataFrame, target_df: DataFrame, merge_keys:list[str], value_keys: list[str]):    
-        
-#         source = (
-#             source_df
-#             .withColumn("hash_key", xxhash64(*merge_keys))
-#             .withColumn("hash_value", xxhash64(*value_keys))
-#         )
-
-#         target = (
-#             target_df
-#             .withColumn("hash_key", xxhash64(*merge_keys))
-#             .withColumn("hash_value", xxhash64(*value_keys))
-#         )
-
-#         log_df = (
-#             target_df
-#             .alias("target")
-#             .merge(
-#                 source = source_df.alias("source"),
-#                 condition = "target.hash_key = source.hash_key"
-#             ).whenMatchUpdateAll(
-#                 condition="target.hash_value != source.hash_value"
-#             )
-#             .whenNotMatchInsertAll(
-                
-#             )
-#         ).execute()
-    
-#     def write_scd_type_2(self, df_source, target_table: str, merge_keys: list):
-#         return
+    def write_scd_type_2(self, df_source, target_table: str, merge_keys: list):
+        return

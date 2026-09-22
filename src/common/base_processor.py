@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pyspark.sql import DataFrame, SparkSession
 from delta.tables import DeltaTable
-from pyspark.sql.functions import col, lit, xxhash64, when, current_date, current_time
+from pyspark.sql.functions import col, lit, xxhash64, when, current_date, current_timestamp
 
 
 
@@ -21,16 +21,17 @@ class SCDType2(BaseProcessor):
     value_keys: list[str]
 
     def save_data(self) -> None:
-        source_df = (
+        source = (
             self.source_df
             .withColumn("hash_key", xxhash64(*self.merge_keys))
             .withColumn("hash_value", xxhash64(*self.value_keys))
         )
-        if self.spark.catalog.tableExists(self.target_table):
-            source_updated = source_df.select(
+        if not self.spark.catalog.tableExists(self.target_table):
+            print(f"ไม่พบตาราง {self.target_table} ระบบจะสร้างใหม่ (Initial Load)")
+            source_updated = source.select(
                 "*", 
                 lit(None).cast("date").alias("end_date"),
-                lit(None).cast("timestamp").alias("last_mod_ts")
+                lit(current_timestamp()).cast("timestamp").alias("last_mod_ts")
                 )
             (
                 source_updated.write
@@ -41,12 +42,12 @@ class SCDType2(BaseProcessor):
             return  
         
         target_df = (
-            spark.table(self.target_table)
-            .filter(col("end_date") is None)   
+            self.spark.table(self.target_table)
+            .filter(col("end_date").isNull())   
         )
 
         source_transform_df = (
-            source_df.alias("source")
+            source.alias("source")
             .join(target_df.alias("target"), 
                   [col("source.hash_key") == col("target.hash_key")], "left")
             .withColumn("record_status", 
@@ -77,19 +78,27 @@ class SCDType2(BaseProcessor):
             insert_df.unionByName(final_change_df)
         )
 
-        delta_table = DeltaTable.forName(spark, self.target_table)
+        delta_table = DeltaTable.forName(self.spark, self.target_table)
+        insert_value = {c: col(f"source.{c}") for c in self.value_keys}
         process = (
             delta_table.alias("target")
-            .merge(result_df.alias("source"), "target.hash_key = source.hash_key")
+            .merge(result_df.alias("source"), "target.hash_key = source.merge_key")
             .whenMatchedUpdate(
                 set = {
                     "end_date": current_date(),
-                    "last_mod_ts": current_time()
-
+                    "last_mod_ts": current_timestamp()
                 },
-                condition = col("target.end_date") is None
+                condition = col("target.end_date").isNull() 
             )
-            .whenNotMatchedInsertAll()
+            .whenNotMatchedInsert(
+                values = {
+                    **insert_value,
+                    "end_date": lit(None).cast("date"),
+                    "hash_key": col("source.hash_key"),
+                    "hash_value": col("source.hash_value"),
+                    "last_mod_ts": current_timestamp()
+                }
+            )
             .execute()
         )
         
@@ -137,7 +146,9 @@ class WriteStrategyFactory():
         write_mode = write_mode.lower()
         if write_mode == "scd1":
             return SCDType1(**kwarges)
-        
+        elif write_mode == "scd2":
+            return SCDType2(**kwarges)
+
 # class BaseProcessor:
 #     def __init__(self, spark):
 #         self.spark = spark

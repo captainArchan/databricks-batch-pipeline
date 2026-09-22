@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pyspark.sql import DataFrame, SparkSession
 from delta.tables import DeltaTable
-from pyspark.sql.functions import col, lit, xxhash64, when
-from datetime import date
+from pyspark.sql.functions import col, lit, xxhash64, when, current_date, current_time
+
 
 
 class BaseProcessor(ABC):
@@ -27,7 +27,11 @@ class SCDType2(BaseProcessor):
             .withColumn("hash_value", xxhash64(*self.value_keys))
         )
         if self.spark.catalog.tableExists(self.target_table):
-            source_updated = source_df.select("*", lit(None).cast("date").alias("end_date"))
+            source_updated = source_df.select(
+                "*", 
+                lit(None).cast("date").alias("end_date"),
+                lit(None).cast("timestamp").alias("last_mod_ts")
+                )
             (
                 source_updated.write
                 .format("delta")
@@ -79,7 +83,9 @@ class SCDType2(BaseProcessor):
             .merge(result_df.alias("source"), "target.hash_key = source.hash_key")
             .whenMatchedUpdate(
                 set = {
-                    "end_date": date.today()
+                    "end_date": current_date(),
+                    "last_mod_ts": current_time()
+
                 },
                 condition = col("target.end_date") is None
             )
@@ -118,7 +124,7 @@ class SCDType1(BaseProcessor):
             target_delta
             .alias("target")
             .merge(
-                source = self.source_df.alias("source"),
+                source = source.alias("source"),
                 condition = "target.hash_key = source.hash_key"
             ).whenMatchedUpdateAll()
             .whenNotMatchedInsertAll()

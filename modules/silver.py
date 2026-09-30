@@ -26,7 +26,6 @@ def get_reason(df: DataFrame) -> DataFrame:
     )
 @dataclass
 class Silverlayer:
-    pipeline_name: str
     table_name: str
     shema_details: dict[str, str]
     keys: list[str]

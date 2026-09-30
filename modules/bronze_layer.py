@@ -42,7 +42,6 @@ class ExtractorFactory:
 
 @dataclass
 class BronzeLayer:
-    pipeline_name: str
     file_path: str
     table_name: str
     write_mode:str

@@ -5,6 +5,17 @@ from pyspark.sql import DataFrame, SparkSession
 from delta.tables import DeltaTable
 from pyspark.sql.functions import col, lit, xxhash64, when, current_date, current_timestamp
 
+def have_table(spark: SparkSession, target_table: str, source_df: DataFrame) -> bool:
+    if not spark.catalog.tableExists(target_table):
+        (
+            source_df.write
+            .format("delta")
+            .mode("overwrite")
+            .saveAsTable(target_table)
+        )
+        return True
+    else:
+        return False
 
 
 class BaseProcessor(ABC):
@@ -26,20 +37,13 @@ class SCDType2(BaseProcessor):
             .withColumn("hash_key", xxhash64(*self.merge_keys))
             .withColumn("hash_value", xxhash64(*self.value_keys))
         )
-        if not self.spark.catalog.tableExists(self.target_table):
-            print(f"ไม่พบตาราง {self.target_table} ระบบจะสร้างใหม่ (Initial Load)")
-            source_updated = source.select(
+        source_updated = source.select(
                 "*", 
                 lit(None).cast("date").alias("end_date"),
                 lit(current_timestamp()).cast("timestamp").alias("last_mod_ts")
-                )
-            (
-                source_updated.write
-                .format("delta")
-                .mode("overwrite")
-                .saveAsTable(self.target_table)
-            ) 
-            return  
+        )
+        if (have_table(self.spark, self.target_table, source_updated)):
+            return
         
         target_df = (
             self.spark.table(self.target_table)
@@ -86,7 +90,7 @@ class SCDType2(BaseProcessor):
             .whenMatchedUpdate(
                 set = {
                     "end_date": current_date(),
-                    "last_mod_ts": current_timestamp()
+                    "last_mod_ts": current_timestamp(),
                 },
                 condition = col("target.end_date").isNull() 
             )
@@ -96,7 +100,9 @@ class SCDType2(BaseProcessor):
                     "end_date": lit(None).cast("date"),
                     "hash_key": col("source.hash_key"),
                     "hash_value": col("source.hash_value"),
-                    "last_mod_ts": current_timestamp()
+                    "last_mod_ts": current_timestamp(),
+                    "_load_dt": current_date(),
+                    "_load_dttm": current_timestamp(),   
                 }
             )
             .execute()
@@ -119,15 +125,9 @@ class SCDType1(BaseProcessor):
             .withColumn("hash_value", xxhash64(*self.value_keys))
         )
 
-        if not self.spark.catalog.tableExists(self.target_table):
-            print(f"ไม่พบตาราง {self.target_table} ระบบจะสร้างใหม่ (Initial Load)")
-            (
-                source.write
-                .format("delta")
-                .mode("overwrite")
-                .saveAsTable(self.target_table)
-            )
+        if(have_table(self.spark, self.target_table, source)):
             return
+        
         target_delta = DeltaTable.forName(self.spark, self.target_table)
         log_df = (
             target_delta
@@ -139,6 +139,39 @@ class SCDType1(BaseProcessor):
             .whenNotMatchedInsertAll()
         ).execute()
 
+@dataclass
+class Append(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+
+    def save_data(self) -> None:
+        if (have_table(self.spark, self.target_table, self.source_df)):
+            return 
+
+        (
+                self.source_df
+                .write
+                .format("delta")
+                .mode("append")
+                .saveAsTable(self.target_table)
+            )
+@dataclass
+class Overwrite(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+    
+    def save_data(self) -> None:
+        if (have_table(self.spark, self.target_table, self.source_df)):
+            return 
+        (
+                self.source_df
+                .write
+                .format("delta")
+                .mode("overwrite")
+                .saveAsTable(self.target_table)
+            )
 
 class WriteStrategyFactory():
     @staticmethod
@@ -148,6 +181,13 @@ class WriteStrategyFactory():
             return SCDType1(**kwarges)
         elif write_mode == "scd2":
             return SCDType2(**kwarges)
+        elif write_mode == "append":
+            return Append(**kwarges)
+        elif write_mode == "overwrite":
+            return Overwrite(**kwarges)
+        
+        raise ValueError(f"Processor for {write_mode} is not supported")
+            
 
 # class BaseProcessor:
 #     def __init__(self, spark):

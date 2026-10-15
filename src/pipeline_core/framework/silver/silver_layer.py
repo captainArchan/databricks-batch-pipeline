@@ -35,15 +35,15 @@ class SilverLayer:
     spark: SparkSession
 
     def __post_init__(self) -> None:
-        self.table_name_bronze = (f"{self.table_name}_bronze")
-        self.table_name_silver = (f"{self.table_name}_silver")
-        self.table_name_bad_record = (f"{self.table_name}_bad_record")
+        self.table_name_bronze = (f"batch_project.{self.table_name}_bronze")
+        self.table_name_silver = (f"batch_project.{self.table_name}_silver")
+        self.table_name_bad_record = (f"batch_project.{self.table_name}_bad_record")
         self.data_col = [col_name for col_name in self.schema_details.keys()]
     
     @classmethod
     def from_config_table(cls, spark: SparkSession,pipeline_name: str)-> "SilverLayer":
         conf = (
-            spark.table("session_11_framework.config_table")
+            spark.table("batch_project.config_table")
             .filter(col("pipeline_name") == pipeline_name)
             .select(
                 "table_name",

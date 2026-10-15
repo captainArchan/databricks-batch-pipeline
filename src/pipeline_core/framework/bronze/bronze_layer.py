@@ -17,12 +17,12 @@ class BronzeLayer:
 
     def __post_init__(self) -> None:
         self.file_format = self.file_path.split(".")[-1]
-        self.table_name_bronze = (f"{self.table_name}_bronze")
+        self.table_name_bronze = (f"batch_project.{self.table_name}_bronze")
 
     @classmethod
     def from_config_table(cls, spark: SparkSession, pipeline_name: str) -> "BronzeLayer":
         conf = (
-            spark.table("session_11_framework.config_table")
+            spark.table("batch_project.config_table")
             .filter(col("pipeline_name") == pipeline_name)
             .select(
                 "encrypt_col",

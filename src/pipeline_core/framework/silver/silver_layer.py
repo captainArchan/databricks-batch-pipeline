@@ -81,6 +81,10 @@ class SilverLayer:
             f"_is_{col_name}_invalid": coalesce(~col(col_name).rlike(REGEX_PATTERNS[col_type]), lit(False))
             for col_name, col_type in self.schema_details.items() if col_type != "string"
         }
+
+        if not invalid_col:
+            return df.transform(get_reason)
+
         invalid_df = (
             df
             .withColumns(invalid_col)

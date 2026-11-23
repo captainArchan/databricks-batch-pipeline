@@ -25,10 +25,10 @@ class BronzeLayer:
             spark.table("batch_project.config_table")
             .filter(col("pipeline_name") == pipeline_name)
             .select(
-                "encrypt_col",
-                "table_name", 
-                "file_path",
-                "source_option"
+                    "encrypt_col",
+                    "table_name", 
+                    "file_path",
+                    "source_option"
                 )
             ).first()
         

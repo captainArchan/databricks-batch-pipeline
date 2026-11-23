@@ -1,0 +1,225 @@
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pyspark.sql import DataFrame, SparkSession
+from delta.tables import DeltaTable
+from pyspark.sql.functions import col, lit, xxhash64, when, current_date, current_timestamp
+
+def have_table(spark: SparkSession, target_table: str, source_df: DataFrame) -> bool:
+    if not spark.catalog.tableExists(target_table):
+        (
+            source_df.write
+            .format("delta")
+            .mode("overwrite")
+            .saveAsTable(target_table)
+        )
+        return True
+    else:
+        return False
+
+
+class BaseProcessor(ABC):
+    @abstractmethod
+    def save_data(self) -> None:
+        pass
+
+@dataclass
+class SCDType2(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+    merge_keys: list[str]
+    value_keys: list[str]
+
+    def save_data(self) -> None:
+        source = (
+            self.source_df
+            .withColumn("hash_key", xxhash64(*self.merge_keys))
+            .withColumn("hash_value", xxhash64(*self.value_keys))
+        )
+        source_updated = source.select(
+                "*", 
+                lit(None).cast("date").alias("end_date"),
+                lit(current_timestamp()).cast("timestamp").alias("last_mod_ts")
+        )
+        if (have_table(self.spark, self.target_table, source_updated)):
+            return
+        
+        target_df = (
+            self.spark.table(self.target_table)
+            .filter(col("end_date").isNull())   
+        )
+
+        source_transform_df = (
+            source.alias("source")
+            .join(target_df.alias("target"), 
+                  [col("source.hash_key") == col("target.hash_key")], "left")
+            .withColumn("record_status", 
+                        when(col("target.hash_key").isNull(), lit("insert"))
+                        .when(col("target.hash_value") != col("source.hash_value"), lit("change"))
+                        .otherwise(lit("no_change"))
+                        )
+            .select("source.*", "record_status")
+        )
+
+        insert_df = (
+            source_transform_df
+            .filter(col("record_status") == 'insert')
+            .withColumn("merge_key", lit(None))
+        )
+
+        change_df = (
+            source_transform_df
+            .filter(col("record_status") == "change")
+        )
+
+        final_change_df = (
+            change_df.withColumn("merge_key", lit(None))
+            .unionByName(change_df.withColumn("merge_key", col("hash_key")))
+        )
+
+        result_df = (
+            insert_df.unionByName(final_change_df)
+        )
+
+        delta_table = DeltaTable.forName(self.spark, self.target_table)
+        insert_value = {c: col(f"source.{c}") for c in self.value_keys}
+        process = (
+            delta_table.alias("target")
+            .merge(result_df.alias("source"), "target.hash_key = source.merge_key")
+            .whenMatchedUpdate(
+                set = {
+                    "end_date": current_date(),
+                    "last_mod_ts": current_timestamp(),
+                },
+                condition = col("target.end_date").isNull() 
+            )
+            .whenNotMatchedInsert(
+                values = {
+                    **insert_value,
+                    "end_date": lit(None).cast("date"),
+                    "hash_key": col("source.hash_key"),
+                    "hash_value": col("source.hash_value"),
+                    "last_mod_ts": current_timestamp(),
+                    "_load_dt": current_date(),
+                    "_load_dttm": current_timestamp(),   
+                }
+            )
+            .execute()
+        )
+        
+
+    
+@dataclass
+class SCDType1(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+    merge_keys: list[str]
+    value_keys: list[str]
+        
+    def save_data(self) -> None:        
+        source = (
+            self.source_df
+            .withColumn("hash_key", xxhash64(*self.merge_keys))
+            .withColumn("hash_value", xxhash64(*self.value_keys))
+        )
+
+        if(have_table(self.spark, self.target_table, source)):
+            return
+        
+        target_delta = DeltaTable.forName(self.spark, self.target_table)
+        log_df = (
+            target_delta
+            .alias("target")
+            .merge(
+                source = source.alias("source"),
+                condition = "target.hash_key = source.hash_key"
+            ).whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+        ).execute()
+
+@dataclass
+class Append(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+
+    def save_data(self) -> None:
+        if (have_table(self.spark, self.target_table, self.source_df)):
+            return 
+
+        (
+                self.source_df
+                .write
+                .format("delta")
+                .mode("append")
+                .saveAsTable(self.target_table)
+            )
+@dataclass
+class Overwrite(BaseProcessor):
+    spark: SparkSession
+    source_df: DataFrame
+    target_table: str
+    
+    def save_data(self) -> None:
+        if (have_table(self.spark, self.target_table, self.source_df)):
+            return 
+        (
+                self.source_df
+                .write
+                .format("delta")
+                .mode("overwrite")
+                .saveAsTable(self.target_table)
+            )
+
+class WriteStrategyFactory():
+    @staticmethod
+    def create(write_mode: str, **kwarges) -> BaseProcessor:
+        write_mode = write_mode.lower()
+        if write_mode == "scd1":
+            return SCDType1(**kwarges)
+        elif write_mode == "scd2":
+            return SCDType2(**kwarges)
+        elif write_mode == "append":
+            return Append(**kwarges)
+        elif write_mode == "overwrite":
+            return Overwrite(**kwarges)
+        
+        raise ValueError(f"Processor for {write_mode} is not supported")
+            
+
+# class BaseProcessor:
+#     def __init__(self, spark):
+#         self.spark = spark
+    
+#     def write_scd_type_1(self, source_df: DataFrame, target_df: DataFrame, merge_keys:list[str], value_keys: list[str]):    
+        
+#         source = (
+#             source_df
+#             .withColumn("hash_key", xxhash64(*merge_keys))
+#             .withColumn("hash_value", xxhash64(*value_keys))
+#         )
+
+#         target = (
+#             target_df
+#             .withColumn("hash_key", xxhash64(*merge_keys))
+#             .withColumn("hash_value", xxhash64(*value_keys))
+#         )
+
+#         log_df = (
+#             target_df
+#             .alias("target")
+#             .merge(
+#                 source = source_df.alias("source"),
+#                 condition = "target.hash_key = source.hash_key"
+#             ).whenMatchUpdateAll(
+#                 condition="target.hash_value != source.hash_value"
+#             )
+#             .whenNotMatchInsertAll(
+                
+#             )
+#         ).execute()
+    
+#     def write_scd_type_2(self, df_source, target_table: str, merge_keys: list):
+#         return

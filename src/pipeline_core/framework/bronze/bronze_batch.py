@@ -43,5 +43,16 @@ class BronzeBatch(BronzeDataPipeline):
                 .mode(self.write_mode)
                 .saveAsTable(self.table_name_bronze)
             )
+
+    def encrypt_df(self, df: DataFrame, encrypt_key: str) -> DataFrame:
+        if self.encrypt_col:
+                    return (
+                        df
+                        .withColumns({
+                            column: aes_encrypt(col(column), lit(encrypt_key), lit("ECB"), lit("PKCS"))  
+                            for column in self.encrypt_col
+                        })
+                    )
+        return df
         
         
